@@ -5,6 +5,7 @@ from livekit.agents import AgentServer, AgentSession, Agent, room_io
 from livekit.plugins import (
     noise_cancellation,
     google,
+    silero
 )
 
 load_dotenv()
