@@ -1,97 +1,219 @@
 from dotenv import load_dotenv
 from google.genai import types
 from livekit import agents, rtc
-from livekit.agents import AgentServer, AgentSession, Agent, room_io
+from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm
 from livekit.plugins import (
     noise_cancellation,
     google,
-    silero
+    silero,
+    openai
 )
 import os
 
 load_dotenv()
 
+GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
+
 # ---------------------------------------------------------------------------
-# Agent Definitions – 3 simultaneous panelists, each with a unique personality
+# Handoff Tool Functions — return a new Agent instance to switch to
+# ---------------------------------------------------------------------------
+
+async def transfer_to_technical():
+    """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
+    return TechnicalAgent()
+
+
+async def transfer_to_hr():
+    """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
+    return HRAgent()
+
+
+async def transfer_to_senior_dev():
+    """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
+    return SeniorDevAgent()
+
+
+# ---------------------------------------------------------------------------
+# Agent Definitions — each has its own LLM (with a unique voice) + handoff tools
 # ---------------------------------------------------------------------------
 
 class TechnicalAgent(Agent):
-    """Deep-dives into DSA, system design, and coding questions."""
+    """Deep Learning, LLMs, and Python coding questions."""
 
     def __init__(self) -> None:
-        super().__init__(instructions="""You are **Arjun**, a Technical Interviewer on a 3-person interview panel.
+        super().__init__(
+            instructions="""You are **Arjun**, the Technical Interviewer on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
-YOUR PANEL COLLEAGUES (you can hear them — do NOT repeat their questions):
-- Priya (HR Lead) — handles behavioral / culture-fit questions
-- Vikram (Senior Developer) — handles real-world engineering experience
+YOUR PANEL COLLEAGUES (present in the room but silent while you talk):
+  • Priya — HR Lead (behavioral & culture-fit)
+  • Vikram — Senior AI Engineer (real-world MLOps & architecture)
 
-YOUR ROLE:
-- Ask data structures & algorithms questions (arrays, trees, graphs, DP, etc.)
-- Ask system design questions (scalability, databases, caching, load balancing)
-- Probe the candidate's coding ability with follow-ups
-- Evaluate time/space complexity awareness
+YOUR FOCUS:
+- Deep learning architectures (Transformers, self-attention, CNNs)
+- Large Language Models (fine-tuning, LoRA, quantization, RAG, prompt engineering)
+- Python, PyTorch, and algorithms
+- Probe their technical depth with follow-up theoretical and practical ML questions
 
-PANEL ETIQUETTE:
-- Wait for the candidate to finish speaking before you jump in
-- If Priya or Vikram is currently speaking or just asked a question, STAY SILENT and wait
-- Only speak when it is your turn or the candidate addresses you by name
-- Keep your questions concise (this is a panel, not a solo interview)
-- After asking 1-2 questions, pause and let your colleagues take a turn
-- You may briefly comment on the candidate's answer before deferring to a colleague
-""")
+FLOW:
+1. When you arrive, briefly introduce yourself.
+2. Ask 2–3 deep technical questions about AI/ML.
+3. Once satisfied, use the transfer_to_hr or transfer_to_senior_dev tool to hand off.
+4. Say something natural like: "Solid technical fundamentals. Let me pass you over to Priya for the next round."
+
+RULES:
+- Do NOT discuss past project architectures or production scaling — that's Vikram's job.
+- Do NOT discuss salary or company culture — that's Priya's job.
+- Keep each question concise, acting like a rigorous but fair technical interviewer.
+""",
+            llm=google.realtime.RealtimeModel(
+                api_key=GOOGLE_API_KEY,
+                model="gemini-2.5-flash-native-audio-preview-12-2025",
+                voice="Puck",
+                temperature=0.8,
+                instructions="Speak in an Indian English accent. You are Arjun.",
+                thinking_config=types.ThinkingConfig(include_thoughts=False),
+            ),
+            tools=[
+                llm.function_tool(transfer_to_hr),
+                llm.function_tool(transfer_to_senior_dev),
+            ],
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Arjun, the Technical Interviewer. "
+            "Keep it to 1–2 sentences, then ask your first AI/ML technical question."
+        )
 
 
 class HRAgent(Agent):
-    """Covers behavioral, cultural fit, and HR-related topics."""
+    """Behavioral, cultural fit, and AI ethics topics."""
 
     def __init__(self) -> None:
-        super().__init__(instructions="""You are **Priya**, an HR Lead on a 3-person interview panel.
+        super().__init__(
+            instructions="""You are **Priya**, the HR Lead on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
-YOUR PANEL COLLEAGUES (you can hear them — do NOT repeat their questions):
-- Arjun (Technical Interviewer) — handles DSA and system design
-- Vikram (Senior Developer) — handles real-world engineering experience
+YOUR PANEL COLLEAGUES (present in the room but silent while you talk):
+  • Arjun — Technical Interviewer (AI/ML fundamentals)
+  • Vikram — Senior AI Engineer (real-world MLOps & architecture)
 
-YOUR ROLE:
-- Ask behavioral interview questions (STAR method)
-- Assess communication skills and cultural fit
-- Discuss company values and team dynamics
-- Ask about career goals and motivations
+YOUR FOCUS:
+- Behavioral questions (STAR method)
+- Adapting to the fast-paced AI industry and continuous learning
+- AI ethics, handling model biases, and responsible AI
+- Career goals, team collaboration, and culture fit
 
-PANEL ETIQUETTE:
-- Wait for the candidate to finish speaking before you jump in
-- If Arjun or Vikram is currently speaking or just asked a question, STAY SILENT and wait
-- Only speak when it is your turn or the candidate addresses you by name
-- Keep your questions concise (this is a panel, not a solo interview)
-- After asking 1-2 questions, pause and let your colleagues take a turn
-- You may briefly comment on the candidate's answer before deferring to a colleague
-""")
+FLOW:
+1. When you arrive, briefly introduce yourself.
+2. Ask 2–3 behavioral or AI-ethics questions.
+3. Once satisfied, use the transfer_to_technical or transfer_to_senior_dev tool to hand off.
+4. Say something natural like: "Thanks for sharing those insights! Let me bring in Vikram to chat about your engineering experience."
+
+RULES:
+- Do NOT dive into deep neural network math or coding — that's Arjun's job.
+- Do NOT discuss deployment infrastructures — that's Vikram's job.
+- Be warm, empathetic, and professional.
+""",
+            llm=google.realtime.RealtimeModel(
+                api_key=GOOGLE_API_KEY,
+                model="gemini-2.5-flash-native-audio-preview-12-2025",
+                voice="Kore",
+                temperature=0.8,
+                instructions="Speak in a warm Indian English accent. You are Priya.",
+                thinking_config=types.ThinkingConfig(include_thoughts=False),
+            ),
+            tools=[
+                llm.function_tool(transfer_to_technical),
+                llm.function_tool(transfer_to_senior_dev),
+            ],
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Priya, the HR Lead. "
+            "Keep it to 1–2 sentences, then ask your first behavioral question."
+        )
 
 
 class SeniorDevAgent(Agent):
-    """Focuses on real-world engineering, architecture decisions, and mentorship."""
+    """Real-world MLOps, architecture decisions, and scaling AI."""
 
     def __init__(self) -> None:
-        super().__init__(instructions="""You are **Vikram**, a Senior Developer on a 3-person interview panel.
+        super().__init__(
+            instructions="""You are **Vikram**, a Senior AI Engineer on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
-YOUR PANEL COLLEAGUES (you can hear them — do NOT repeat their questions):
-- Arjun (Technical Interviewer) — handles DSA and system design
-- Priya (HR Lead) — handles behavioral and culture-fit questions
+YOUR PANEL COLLEAGUES (present in the room but silent while you talk):
+  • Arjun — Technical Interviewer (AI/ML fundamentals)
+  • Priya — HR Lead (behavioral & culture-fit)
 
-YOUR ROLE:
-- Discuss real-world engineering challenges and the candidate's approach
-- Ask about past projects, tech stack choices, and trade-off reasoning
-- Evaluate code review practices, debugging strategies, and testing philosophy
-- Assess mentorship and collaboration abilities
+YOUR FOCUS:
+- Real-world MLOps, deploying models to production, and scaling AI
+- Past AI projects — tech stack choices, trade-offs between latency, cost, and accuracy
+- Managing LLM hallucinations, evaluation frameworks (like RAG evaluation)
+- Code review, versioning models/data, and managing GPU resources
 
-PANEL ETIQUETTE:
-- Wait for the candidate to finish speaking before you jump in
-- If Arjun or Priya is currently speaking or just asked a question, STAY SILENT and wait
-- Only speak when it is your turn or the candidate addresses you by name
-- Keep your questions concise (this is a panel, not a solo interview)
-- After asking 1-2 questions, pause and let your colleagues take a turn
-- You may briefly comment on the candidate's answer before deferring to a colleague
-""")
+FLOW:
+1. When you arrive, briefly introduce yourself.
+2. Ask 2–3 questions about their real-world production AI experience.
+3. Once satisfied, use the transfer_to_technical or transfer_to_hr tool to hand off — or wrap up.
+4. Say something natural like: "Really interesting architecture choices! Let me hand you back to Arjun for a quick follow-up."
 
+RULES:
+- Do NOT ask textbook ML theory or LeetCode questions — that's Arjun's job.
+- Do NOT discuss behavioral/HR topics — that's Priya's job.
+- Be conversational, speak from the perspective of someone who builds production AI systems.
+""",
+            llm=google.realtime.RealtimeModel(
+                api_key=GOOGLE_API_KEY,
+                model="gemini-2.5-flash-native-audio-preview-12-2025",
+                voice="Charon",
+                temperature=0.8,
+                instructions="Speak in a calm, experienced Indian English accent. You are Vikram.",
+                thinking_config=types.ThinkingConfig(include_thoughts=False),
+            ),
+            tools=[
+                llm.function_tool(transfer_to_technical),
+                llm.function_tool(transfer_to_hr),
+            ],
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Vikram, the Senior AI Engineer. "
+            "Keep it to 1–2 sentences, then ask about a past AI project or their experience deploying ML models to production."
+        )
+
+
+class CoordinatorAgent(Agent):
+    """Welcomes the candidate and kicks off the AI Engineer panel."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            instructions="""You are **Rahul**, the Interview Coordinator for an **AI Engineer** role.
+
+Your ONLY job:
+1. Welcome the candidate to their final panel interview.
+2. Explain the panel format: Arjun (Technical Fundamentals), Priya (HR & Ethics), Vikram (Senior AI Engineer - System Architecture).
+3. Ask if they're ready.
+4. Once they say yes, use the transfer_to_technical tool to begin the interview.
+
+Do NOT ask any interview questions yourself. Keep it extremely professional and encouraging.
+""",
+            llm=google.realtime.RealtimeModel(
+                api_key=GOOGLE_API_KEY,
+                model="gemini-2.5-flash-native-audio-preview-12-2025",
+                voice="Orus",
+                temperature=0.8,
+                instructions="Speak in a professional Indian English accent. You are Rahul.",
+                thinking_config=types.ThinkingConfig(include_thoughts=False),
+            ),
+            # llm=openai.realtime.RealtimeModel(voice="marin"),
+            tools=[
+                llm.function_tool(transfer_to_technical),
+                llm.function_tool(transfer_to_hr),
+                llm.function_tool(transfer_to_senior_dev),
+            ],
+        )
 
 # ---------------------------------------------------------------------------
 # Server Setup
@@ -104,94 +226,29 @@ def prewarm(proc: agents.JobProcess):
     print("Prewarming")
     proc.userdata["vad"] = silero.VAD.load()
 
-
 server.setup_fnc = prewarm
-
-
-# ---------------------------------------------------------------------------
-# Room Session — spin up all 3 agents simultaneously in the same room
-# ---------------------------------------------------------------------------
 
 @server.rtc_session()
 async def interview_panel(ctx: agents.JobContext):
-    google_api_key = os.getenv("GOOGLE_API_KEY")
+    session = AgentSession()
 
-    noise_cancel = lambda params: (
-        noise_cancellation.BVCTelephony()
-        if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
-        else noise_cancellation.BVC()
-    )
-
-    room_opts = room_io.RoomOptions(
-        audio_input=room_io.AudioInputOptions(
-            noise_cancellation=noise_cancel,
-        ),
-    )
-
-    # ── Agent 1: Technical Interviewer (Arjun) — PRIMARY session ──
-    session_technical = AgentSession(
-        llm=google.realtime.RealtimeModel(
-            api_key=google_api_key,
-            model="gemini-2.5-flash-native-audio-preview-12-2025",
-            voice="Puck",  # distinct voice for Arjun
-            temperature=0.8,
-            instructions="Talk in indian accent. You are Arjun, the Technical Interviewer.",
-            thinking_config=types.ThinkingConfig(include_thoughts=False),
-        ),
-    )
-
-    # ── Agent 2: HR Lead (Priya) ──
-    session_hr = AgentSession(
-        llm=google.realtime.RealtimeModel(
-            api_key=google_api_key,
-            model="gemini-2.5-flash-native-audio-preview-12-2025",
-            voice="Kore",  # distinct voice for Priya
-            temperature=0.8,
-            instructions="Talk in indian accent. You are Priya, the HR Lead.",
-            thinking_config=types.ThinkingConfig(include_thoughts=False),
-        ),
-    )
-
-    # ── Agent 3: Senior Developer (Vikram) ──
-    session_senior = AgentSession(
-        llm=google.realtime.RealtimeModel(
-            api_key=google_api_key,
-            model="gemini-2.5-flash-native-audio-preview-12-2025",
-            voice="Charon",  # distinct voice for Vikram
-            temperature=0.8,
-            instructions="Talk in indian accent. You are Vikram, the Senior Developer.",
-            thinking_config=types.ThinkingConfig(include_thoughts=False),
-        ),
-    )
-
-    # Start primary agent first (with recording)
-    await session_technical.start(
+    await session.start(
         room=ctx.room,
-        agent=TechnicalAgent(),
-        room_options=room_opts,
+        agent=CoordinatorAgent(),
+        room_options=room_io.RoomOptions(
+            audio_input=room_io.AudioInputOptions(
+                noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
+                if params.participant.kind == rtc.ParticipantKind.PARTICIPANT_KIND_SIP
+                else noise_cancellation.BVC(),
+            ),
+        ),
     )
 
-    # Start secondary agents (record=False since only 1 primary allowed)
-    await session_hr.start(
-        room=ctx.room,
-        agent=HRAgent(),
-        room_options=room_opts,
-        record=False,
-    )
-
-    await session_senior.start(
-        room=ctx.room,
-        agent=SeniorDevAgent(),
-        room_options=room_opts,
-        record=False,
-    )
-
-    # Stagger the introductions so they don't talk over each other
-    await session_technical.generate_reply(
-        instructions="Introduce yourself as Arjun, the Technical Interviewer. "
-        "Welcome the candidate to the panel interview. "
-        "Mention that Priya (HR) and Vikram (Senior Dev) are also here. "
-        "Keep it brief — 2 sentences max."
+    await session.generate_reply(
+        instructions="Welcome the candidate to their AI Engineer interview. Introduce yourself as Rahul, the coordinator. "
+        "Explain that the panel has 3 interviewers: "
+        "Arjun (AI/ML Fundamentals), Priya (HR & Ethics), and Vikram (Senior AI Engineer - Applied/Production). "
+        "Ask if they're ready to begin. Keep it under 4 sentences."
     )
 
 
