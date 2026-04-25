@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 from google.genai import types
 from livekit import agents, rtc
-from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm
+from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm, RunContext, function_tool
 from livekit.plugins import (
     noise_cancellation,
     google,
@@ -15,32 +15,13 @@ load_dotenv()
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
 
 # ---------------------------------------------------------------------------
-# Handoff Tool Functions — return a new Agent instance to switch to
-# ---------------------------------------------------------------------------
-
-async def transfer_to_technical():
-    """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
-    return TechnicalAgent()
-
-
-async def transfer_to_hr():
-    """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
-    return HRAgent()
-
-
-async def transfer_to_senior_dev():
-    """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
-    return SeniorDevAgent()
-
-
-# ---------------------------------------------------------------------------
 # Agent Definitions — each has its own LLM (with a unique voice) + handoff tools
 # ---------------------------------------------------------------------------
 
 class TechnicalAgent(Agent):
     """Deep Learning, LLMs, and Python coding questions."""
 
-    def __init__(self) -> None:
+    def __init__(self, chat_ctx: llm.ChatContext | None = None) -> None:
         super().__init__(
             instructions="""You are **Arjun**, the Technical Interviewer on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
@@ -74,10 +55,21 @@ RULES:
                 thinking_config=types.ThinkingConfig(include_thoughts=False),
             ),
             tools=[
-                llm.function_tool(transfer_to_hr),
-                llm.function_tool(transfer_to_senior_dev),
+                # self.transfer_to_hr,
+                # self.transfer_to_senior_dev,
             ],
+            chat_ctx=chat_ctx,
         )
+
+    @function_tool()
+    async def transfer_to_hr(self, context: RunContext):
+        """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
+        return HRAgent(chat_ctx=self.chat_ctx), "Transferring to Priya"
+
+    @function_tool()
+    async def transfer_to_senior_dev(self, context: RunContext):
+        """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
+        return SeniorDevAgent(chat_ctx=self.chat_ctx), "Transferring to Vikram"
 
     async def on_enter(self) -> None:
         self.session.generate_reply(
@@ -89,7 +81,7 @@ RULES:
 class HRAgent(Agent):
     """Behavioral, cultural fit, and AI ethics topics."""
 
-    def __init__(self) -> None:
+    def __init__(self, chat_ctx: llm.ChatContext | None = None) -> None:
         super().__init__(
             instructions="""You are **Priya**, the HR Lead on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
@@ -123,10 +115,21 @@ RULES:
                 thinking_config=types.ThinkingConfig(include_thoughts=False),
             ),
             tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_senior_dev),
+                # self.transfer_to_technical,
+                # self.transfer_to_senior_dev,
             ],
+            chat_ctx=chat_ctx,
         )
+
+    @function_tool()
+    async def transfer_to_technical(self, context: RunContext):
+        """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
+        return TechnicalAgent(chat_ctx=self.chat_ctx), "Transferring to Arjun"
+
+    @function_tool()
+    async def transfer_to_senior_dev(self, context: RunContext):
+        """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
+        return SeniorDevAgent(chat_ctx=self.chat_ctx), "Transferring to Vikram"
 
     async def on_enter(self) -> None:
         self.session.generate_reply(
@@ -138,7 +141,7 @@ RULES:
 class SeniorDevAgent(Agent):
     """Real-world MLOps, architecture decisions, and scaling AI."""
 
-    def __init__(self) -> None:
+    def __init__(self, chat_ctx: llm.ChatContext | None = None) -> None:
         super().__init__(
             instructions="""You are **Vikram**, a Senior AI Engineer on a 3-person panel interviewing a candidate for an **AI Engineer** position.
 
@@ -172,10 +175,21 @@ RULES:
                 thinking_config=types.ThinkingConfig(include_thoughts=False),
             ),
             tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_hr),
+                # self.transfer_to_technical,
+                # self.transfer_to_hr,
             ],
+            chat_ctx=chat_ctx,
         )
+
+    @function_tool()
+    async def transfer_to_technical(self, context: RunContext):
+        """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
+        return TechnicalAgent(chat_ctx=self.chat_ctx), "Transferring to Arjun"
+
+    @function_tool()
+    async def transfer_to_hr(self, context: RunContext):
+        """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
+        return HRAgent(chat_ctx=self.chat_ctx), "Transferring to Priya"
 
     async def on_enter(self) -> None:
         self.session.generate_reply(
@@ -187,7 +201,7 @@ RULES:
 class CoordinatorAgent(Agent):
     """Welcomes the candidate and kicks off the AI Engineer panel."""
 
-    def __init__(self) -> None:
+    def __init__(self, chat_ctx: llm.ChatContext | None = None) -> None:
         super().__init__(
             instructions="""You are **Rahul**, the Interview Coordinator for an **AI Engineer** role.
 
@@ -209,11 +223,27 @@ Do NOT ask any interview questions yourself. Keep it extremely professional and 
             ),
             # llm=openai.realtime.RealtimeModel(voice="marin"),
             tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_hr),
-                llm.function_tool(transfer_to_senior_dev),
+                # self.transfer_to_technical,
+                # self.transfer_to_hr,
+                # self.transfer_to_senior_dev,
             ],
+            chat_ctx=chat_ctx,
         )
+
+    @function_tool()
+    async def transfer_to_technical(self, context: RunContext):
+        """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
+        return TechnicalAgent(chat_ctx=self.chat_ctx), "Transferring to Arjun"
+
+    @function_tool()
+    async def transfer_to_hr(self, context: RunContext):
+        """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
+        return HRAgent(chat_ctx=self.chat_ctx), "Transferring to Priya"
+
+    @function_tool()
+    async def transfer_to_senior_dev(self, context: RunContext):
+        """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
+        return SeniorDevAgent(chat_ctx=self.chat_ctx), "Transferring to Vikram"
 
 # ---------------------------------------------------------------------------
 # Server Setup
