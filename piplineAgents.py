@@ -12,7 +12,6 @@ from livekit.plugins import (
     silero,
     openai,
     deepgram,
-
 )
 import os
 
