@@ -1,3 +1,5 @@
+import asyncio
+import time as _time
 from dataclasses import dataclass
 from typing import Optional
 from livekit.agents import ChatContext
@@ -24,6 +26,87 @@ DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
+
+time_limits = {"tech_lead": 4, "behavioral": 2, "culture": 2}  # minutes per agent
+
+
+# ---------------------------------------------------------------------------
+# Time-Alert Helper — fires background warnings so agents wrap up on time
+# ---------------------------------------------------------------------------
+
+async def _start_time_alerts(agent: Agent, segment_name: str):
+    """Spawn a background task that nudges the agent at key time thresholds.
+
+    Thresholds (in minutes remaining):
+      • 2 min left  → gentle nudge
+      • 1 min left  → firm reminder
+      • 0 min left  → hard stop, instructs handoff
+
+    The task is stored on `agent._timer_task` so it can be cancelled in
+    on_exit or when the agent is garbage-collected.
+    """
+    total_minutes = time_limits.get(segment_name)
+    if total_minutes is None:
+        return  # host has no time limit
+
+    total_seconds = total_minutes * 60
+    start = _time.monotonic()
+
+    # Define thresholds as (remaining_seconds, instruction_message)
+    thresholds = [
+        (
+            120,
+            f"⏱️ TIME CHECK: You have about 2 minutes left in your {total_minutes}-minute segment. "
+            f"Start wrapping up your current question — do NOT start a new primary question.",
+        ),
+        (
+            60,
+            f"⏱️ ONE MINUTE LEFT: You have ~1 minute remaining. Finish your current probe "
+            f"and begin your handoff transition to the next panelist.",
+        ),
+        (
+            0,
+            f"⏱️ TIME'S UP: Your {total_minutes}-minute segment is over. "
+            f"Immediately deliver your closing line and hand off to the next panelist NOW.",
+        ),
+    ]
+
+    # Only keep thresholds that make sense for the segment length
+    thresholds = [
+        (remaining, msg)
+        for remaining, msg in thresholds
+        if remaining < total_seconds  # skip if threshold >= total time
+    ] + [(0, thresholds[-1][1])]  # always keep the "time's up" alert
+
+    # Deduplicate the 0-second entry if it was already there
+    seen = set()
+    unique_thresholds = []
+    for remaining, msg in thresholds:
+        if remaining not in seen:
+            seen.add(remaining)
+            unique_thresholds.append((remaining, msg))
+    thresholds = sorted(unique_thresholds, key=lambda x: x[0], reverse=True)
+
+    for remaining_threshold, message in thresholds:
+        elapsed = _time.monotonic() - start
+        fire_at = total_seconds - remaining_threshold
+        delay = fire_at - elapsed
+        if delay > 0:
+            await asyncio.sleep(delay)
+
+        # Agent may have already been swapped out
+        if agent.session is None:
+            return
+
+        agent.session.generate_reply(instructions=message)
+
+    # After the final alert, give a 30-second grace period then force handoff
+    await asyncio.sleep(30)
+    if agent.session is not None:
+        agent.session.generate_reply(
+            instructions="⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. "
+            "Say your closing line and call the transfer function immediately."
+        )
 
 # ---------------------------------------------------------------------------
 # Handoff Tool Functions — return a new Agent instance to switch to
@@ -93,7 +176,7 @@ class HostAgent(Agent):
         )
 
     async def on_enter(self) -> None:
-        # Sarah handles the initial welcome or wrap up
+        # Sarah (host) has no time limit — she manages the overall flow
         pass
 
 
@@ -120,7 +203,10 @@ class TechLeadAgent(Agent):
     async def on_enter(self) -> None:
         self.session.generate_reply(
             instructions="Introduce yourself as Marcus, the Tech Lead. "
-            "Directly jump into checking their technical depth by asking a complex follow-up or a new system design question."
+            )
+        # Start time-tracking alerts for this segment
+        self._timer_task = asyncio.create_task(
+            _start_time_alerts(self, "tech_lead")
         )
 
 
@@ -147,7 +233,10 @@ class BehavioralAgent(Agent):
     async def on_enter(self) -> None:
         self.session.generate_reply(
             instructions="Introduce yourself as Sophia, the Behavioral Interviewer. "
-            "Ask for a specific example of a difficult situation or conflict they faced in a past role."
+        )
+        # Start time-tracking alerts for this segment
+        self._timer_task = asyncio.create_task(
+            _start_time_alerts(self, "behavioral")
         )
 
 
@@ -174,7 +263,10 @@ class CultureAgent(Agent):
     async def on_enter(self) -> None:
         self.session.generate_reply(
             instructions="Introduce yourself as Elena, covering Culture and Soft Skills. "
-            "Ask a conversational, perhaps slightly unexpected question to get used to the candidate's personality."
+        )
+        # Start time-tracking alerts for this segmnt
+        self._timer_task = asyncio.create_task(
+            _start_time_alerts(self, "culture")
         )
 
 # ---------------------------------------------------------------------------
