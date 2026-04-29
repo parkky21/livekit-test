@@ -15,7 +15,7 @@ from livekit.plugins import (
 )
 import os
 from helpers.printer_logs import print_conversation_context
-from helpers.prompts_text import technical, hr, senior_dev, coordinator
+from helpers.prompts_text import host_manager, tech_lead, behavioral, culture_fit
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -29,9 +29,18 @@ persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 # Handoff Tool Functions — return a new Agent instance to switch to
 # ---------------------------------------------------------------------------
 
-async def transfer_to_technical(context: RunContext):
-    """Transfer the conversation to Arjun (Technical Interviewer) for AI, ML, and coding questions."""
-    return TechnicalAgent(
+async def transfer_to_host(context: RunContext):
+    """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
+    return HostAgent(
+        chat_ctx=context.session._chat_ctx.copy(
+        exclude_function_call=True,
+        exclude_instructions=True,
+        )
+    )
+
+async def transfer_to_tech_lead(context: RunContext):
+    """Transfer the conversation to Marcus (Tech Lead) for deep technical and architecture questions."""
+    return TechLeadAgent(
         chat_ctx=context.session._chat_ctx.copy(
         exclude_function_call=True,
         exclude_instructions=True,
@@ -39,128 +48,133 @@ async def transfer_to_technical(context: RunContext):
     )
 
 
-async def transfer_to_hr(context: RunContext):
-    """Transfer the conversation to Priya (HR Lead) for behavioral and culture-fit questions."""
-    print("Transferring to HR Agent")
-    chat = context.session._chat_ctx.copy(
+async def transfer_to_behavioral(context: RunContext):
+    """Transfer the conversation to Sophia (Behavioral Interviewer) for STAR-method questions about past experiences."""
+    return BehavioralAgent(
+        chat_ctx=context.session._chat_ctx.copy(
         exclude_function_call=True,
         exclude_instructions=True,
         )
-    print_conversation_context(chat)
-    return HRAgent(
-        chat_ctx=chat
     )
 
 
-async def transfer_to_senior_dev(context: RunContext):
-    """Transfer the conversation to Vikram (Senior AI Engineer) for real-world MLOps and architecture discussions."""
-    return SeniorDevAgent(chat_ctx=context.session._chat_ctx.copy(
+async def transfer_to_culture(context: RunContext):
+    """Transfer the conversation to Elena (Culture/Soft Skills) for conversational assessment of values and communication."""
+    return CultureAgent(
+        chat_ctx=context.session._chat_ctx.copy(
         exclude_function_call=True,
         exclude_instructions=True,
-        ))
+        )
+    )
 
 
 # ---------------------------------------------------------------------------
 # Agent Definitions — each has its own LLM (with a unique voice) + handoff tools
 # ---------------------------------------------------------------------------
 
-class TechnicalAgent(Agent):
-    """Deep Learning, LLMs, and Python coding questions."""
-
-    def __init__(self,chat_ctx: ChatContext) -> None:
-        super().__init__(
-            instructions=technical,
-            tts=openai.TTS(
-                base_url="https://api.lemonfox.ai/v1",
-                model="tts-1",
-                api_key=LEMONFOX_API_KEY,
-                voice=persona["boy"][1]
-            ),
-            tools=[
-                llm.function_tool(transfer_to_hr),
-                llm.function_tool(transfer_to_senior_dev),
-            ],
-            chat_ctx=chat_ctx
-        )
-
-    async def on_enter(self) -> None:
-        chat = self.chat_ctx
-        self.session.generate_reply(
-            instructions="Introduce yourself as Arjun, the Technical Interviewer. "
-            "Keep it to 1–2 sentences, then ask your first AI/ML technical question."
-        )
-
-
-class HRAgent(Agent):
-    """Behavioral, cultural fit, and AI ethics topics."""
-
-    def __init__(self,chat_ctx: ChatContext) -> None:
-        super().__init__(
-            instructions=hr,
-            tts=openai.TTS(
-                base_url="https://api.lemonfox.ai/v1",
-                model="tts-1",
-                api_key=LEMONFOX_API_KEY,
-                voice=persona["girl"][0]
-            ),
-            tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_senior_dev),
-            ],
-            chat_ctx=chat_ctx
-        )
-
-    async def on_enter(self) -> None:
-        self.session.generate_reply(
-            instructions="Introduce yourself as Priya, the HR Lead. "
-            "Keep it to 1–2 sentences, then ask your first behavioral question."
-        )
-
-
-class SeniorDevAgent(Agent):
-    """Real-world MLOps, architecture decisions, and scaling AI."""
-
-    def __init__(self,chat_ctx: ChatContext) -> None:
-        super().__init__(
-            instructions=senior_dev,
-            tts=openai.TTS(
-                base_url="https://api.lemonfox.ai/v1",
-                model="tts-1",
-                api_key=LEMONFOX_API_KEY,
-                voice=persona["boy"][2]
-            ),
-            tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_hr),
-            ],
-            chat_ctx=chat_ctx
-        )
-
-    async def on_enter(self) -> None:
-        self.session.generate_reply(
-            instructions="Introduce yourself as Vikram, the Senior AI Engineer. "
-            "Keep it to 1–2 sentences, then ask about a past AI project or their experience deploying ML models to production."
-        )
-
-
-class CoordinatorAgent(Agent):
-    """Welcomes the candidate and kicks off the AI Engineer panel."""
+class HostAgent(Agent):
+    """The face of the interview. Manages opening, transitions, and closing."""
 
     def __init__(self, chat_ctx: Optional[ChatContext] = None) -> None:
         super().__init__(
-            instructions=coordinator,
+            instructions=host_manager,
             tts=openai.TTS(
                 base_url="https://api.lemonfox.ai/v1",
                 model="tts-1",
                 api_key=LEMONFOX_API_KEY,
-                voice=persona["boy"][0]
+                voice=persona["girl"][2]  # Sarah
             ),
             tools=[
-                llm.function_tool(transfer_to_technical),
-                llm.function_tool(transfer_to_hr),
-                llm.function_tool(transfer_to_senior_dev),
+                llm.function_tool(transfer_to_tech_lead),
+                llm.function_tool(transfer_to_behavioral),
+                llm.function_tool(transfer_to_culture),
             ],
             chat_ctx=chat_ctx
+        )
+
+    async def on_enter(self) -> None:
+        # Sarah handles the initial welcome or wrap up
+        pass
+
+
+class TechLeadAgent(Agent):
+    """Deep technical, system design, and pressure testing."""
+
+    def __init__(self, chat_ctx: ChatContext) -> None:
+        super().__init__(
+            instructions=tech_lead,
+            tts=openai.TTS(
+                base_url="https://api.lemonfox.ai/v1",
+                model="tts-1",
+                api_key=LEMONFOX_API_KEY,
+                voice=persona["boy"][0]  # Marcus
+            ),
+            tools=[
+                llm.function_tool(transfer_to_host),
+                llm.function_tool(transfer_to_behavioral),
+                llm.function_tool(transfer_to_culture),
+            ],
+            chat_ctx=chat_ctx
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Marcus, the Tech Lead. "
+            "Directly jump into checking their technical depth by asking a complex follow-up or a new system design question."
+        )
+
+
+class BehavioralAgent(Agent):
+    """STAR method specialist looking for patterns in past experiences."""
+
+    def __init__(self, chat_ctx: ChatContext) -> None:
+        super().__init__(
+            instructions=behavioral,
+            tts=openai.TTS(
+                base_url="https://api.lemonfox.ai/v1",
+                model="tts-1",
+                api_key=LEMONFOX_API_KEY,
+                voice=persona["girl"][1]  # Sophia
+            ),
+            tools=[
+                llm.function_tool(transfer_to_host),
+                llm.function_tool(transfer_to_tech_lead),
+                llm.function_tool(transfer_to_culture),
+            ],
+            chat_ctx=chat_ctx
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Sophia, the Behavioral Interviewer. "
+            "Ask for a specific example of a difficult situation or conflict they faced in a past role."
+        )
+
+
+class CultureAgent(Agent):
+    """Assessment of communication, values, and self-awareness."""
+
+    def __init__(self, chat_ctx: ChatContext) -> None:
+        super().__init__(
+            instructions=culture_fit,
+            tts=openai.TTS(
+                base_url="https://api.lemonfox.ai/v1",
+                model="tts-1",
+                api_key=LEMONFOX_API_KEY,
+                voice=persona["girl"][0]  # Elena
+            ),
+            tools=[
+                llm.function_tool(transfer_to_host),
+                llm.function_tool(transfer_to_tech_lead),
+                llm.function_tool(transfer_to_behavioral),
+            ],
+            chat_ctx=chat_ctx
+        )
+
+    async def on_enter(self) -> None:
+        self.session.generate_reply(
+            instructions="Introduce yourself as Elena, covering Culture and Soft Skills. "
+            "Ask a conversational, perhaps slightly unexpected question to get used to the candidate's personality."
         )
 
 # ---------------------------------------------------------------------------
@@ -195,7 +209,7 @@ async def interview_panel(ctx: agents.JobContext):
 
     await session.start(
         room=ctx.room,
-        agent=CoordinatorAgent(),
+        agent=HostAgent(),
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=lambda params: noise_cancellation.BVCTelephony()
@@ -206,9 +220,10 @@ async def interview_panel(ctx: agents.JobContext):
     )
 
     await session.generate_reply(
-        instructions="Welcome the candidate to their AI Engineer interview. Introduce yourself as Rahul, the coordinator. "
-        "Explain that the panel has 3 interviewers: "
-        "Arjun (AI/ML Fundamentals), Priya (HR & Ethics), and Vikram (Senior AI Engineer - Applied/Production). "
+        instructions="Welcome the candidate to their AI Engineer interview. Introduce yourself as Sarah, the Hiring Manager and Host. "
+        "Explain that the panel has 4 interviewers: "
+        "Yourself (Host), Marcus (Tech Lead), Sophia (Behavioral), and Elena (Culture/Soft Skills). "
+        "Invite them to briefly introduce themselves, then explain you'll pass them to Marcus to start. "
         "Ask if they're ready to begin. Keep it under 4 sentences."
     )
 
