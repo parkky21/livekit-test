@@ -18,6 +18,7 @@ from livekit.plugins import (
 import os
 from helpers.printer_logs import print_conversation_context
 from helpers.prompts_text import host_manager, tech_lead, behavioral, culture_fit
+from helpers.time_alerts import _start_time_alerts
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -27,92 +28,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 
-time_limits = {"tech_lead": 2, "behavioral": 2, "culture": 2}  # minutes per agent
-
-
-# ---------------------------------------------------------------------------
-# Time-Alert Helper — appends system messages to chat_ctx so agents
-# naturally see time pressure on their next turn (no forced interruptions)
-# ---------------------------------------------------------------------------
-
-async def _start_time_alerts(agent: Agent, segment_name: str):
-    """Background task that injects time-awareness into the agent's chat context.
-
-    Instead of forcing generate_reply (which interrupts the conversation),
-    this appends system messages to `session.chat_ctx`. The agent sees the
-    time constraint the next time it naturally responds, so it wraps up
-    organically.
-
-    Only the final "time's up" alert uses generate_reply to force an
-    immediate handoff if the agent hasn't transitioned yet.
-    """
-    total_minutes = time_limits.get(segment_name)
-    if total_minutes is None:
-        return  # host has no time limit
-
-    total_seconds = total_minutes * 60
-    start = _time.monotonic()
-
-    # (remaining_seconds, message, force_reply)
-    # force_reply=False → silent ctx append; True → generate_reply to force action
-    # (remaining_seconds, message, force_reply)
-    alerts = []
-    
-    # 1. Add half-time alert (if segment is strictly > 1 minute)
-    half_time = total_seconds // 2
-    if half_time > 60:
-        alerts.append((
-            half_time,
-            f"[TIME CHECK] You have used about half your {total_minutes}-minute segment. "
-            f"Be mindful of pacing — do NOT start a new primary question after this point.",
-            False,
-        ))
-        
-    # 2. Add 1-minute alert (if segment is >= 1 minute)
-    if total_seconds >= 60:
-        alerts.append((
-            60,
-            f"[1 MINUTE LEFT] You have approximately 1 minute remaining. "
-            f"Finish your current probe and begin your handoff transition.",
-            False,
-        ))
-        
-    # 3. Always add time's up
-    alerts.append((
-        0,
-        f"[TIME'S UP] Your {total_minutes}-minute segment is over. "
-        f"Immediately deliver your closing line and hand off to the next panelist NOW.",
-        True,
-    ))
-
-    # Sort so highest-remaining triggers first
-    valid_alerts = sorted(alerts, key=lambda x: x[0], reverse=True)
-
-    for remaining_threshold, message, force_reply in valid_alerts:
-        elapsed = _time.monotonic() - start
-        fire_at = total_seconds - remaining_threshold
-        delay = fire_at - elapsed
-        if delay > 0:
-            await asyncio.sleep(delay)
-
-        # Agent may have already been swapped out
-        if agent.session is None:
-            return
-
-        # Both silent nudges and forced replies should be visible in chat_ctx
-        print(f"[TIME CHECK] Appending system message to chat_ctx: {message}")
-        agent.session.chat_ctx.add_message(role="system", content=message)
-
-        if force_reply:
-            # Hard stop — make the agent speak and hand off immediately
-            agent.session.generate_reply(instructions=message)
-
-    # Grace period: 30s after time's up, force handoff if still here
-    await asyncio.sleep(30)
-    if agent.session is not None:
-        msg = "⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. Say your closing line and call the transfer function immediately."
-        agent.session.chat_ctx.add_message(role="system", content=msg)
-        agent.session.generate_reply(instructions=msg)
+time_limits = {"tech_lead": 3, "behavioral": 3, "culture": 3}  # minutes per agent
 
 # ---------------------------------------------------------------------------
 # Handoff Tool Functions — return a new Agent instance to switch to
@@ -123,8 +39,8 @@ async def transfer_to_host(context: RunContext):
     print_conversation_context(context)
     return HostAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        # exclude_function_call=True,
-        # exclude_instructions=True,
+        exclude_function_call=True,
+        exclude_instructions=False,
         )
     )
 
@@ -133,8 +49,8 @@ async def transfer_to_tech_lead(context: RunContext):
     print_conversation_context(context)
     return TechLeadAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        # exclude_function_call=True,
-        # exclude_instructions=True,
+        exclude_function_call=True,
+        exclude_instructions=False,
         )
     )
 
@@ -144,8 +60,8 @@ async def transfer_to_behavioral(context: RunContext):
     print_conversation_context(context)
     return BehavioralAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        # exclude_function_call=True,
-        # exclude_instructions=True,
+        exclude_function_call=True,
+        exclude_instructions=False,
         )
     )
 
@@ -155,8 +71,8 @@ async def transfer_to_culture(context: RunContext):
     print_conversation_context(context)
     return CultureAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        # exclude_function_call=True,
-        # exclude_instructions=True,
+        exclude_function_call=True,
+        exclude_instructions=False,
         )
     )
 
@@ -216,7 +132,7 @@ class TechLeadAgent(Agent):
             )
         # Start time-tracking alerts for this segment
         self._timer_task = asyncio.create_task(
-            _start_time_alerts(self, "tech_lead")
+            _start_time_alerts(self, "tech_lead", time_limits)
         )
 
 
@@ -246,7 +162,7 @@ class BehavioralAgent(Agent):
         )
         # Start time-tracking alerts for this segment
         self._timer_task = asyncio.create_task(
-            _start_time_alerts(self, "behavioral")
+            _start_time_alerts(self, "behavioral", time_limits)
         )
 
 
@@ -276,7 +192,7 @@ class CultureAgent(Agent):
         )
         # Start time-tracking alerts for this segmnt
         self._timer_task = asyncio.create_task(
-            _start_time_alerts(self, "culture")
+            _start_time_alerts(self, "culture", time_limits)
         )
 
 # ---------------------------------------------------------------------------
