@@ -6,9 +6,19 @@ def print_conversation_context(context: RunContext):
         exclude_instructions=False,
     )
     print("--- Current Conversation Context ---")
-    # In some versions of livekit-agents, messages is a method. In others, a property.
-    messages_list = chat.messages() if callable(chat.messages) else chat.messages
-    for msg in messages_list:
-        content = getattr(msg, "text_content", str(msg.content))
-        print(f"[{msg.role}]: {content}")
+    
+    # Iterate over all items to catch 'agent_config_update' which holds instructions in newer versions
+    items_list = chat.items if hasattr(chat, "items") else (chat.messages() if callable(getattr(chat, "messages", None)) else getattr(chat, "messages", []))
+    
+    for item in items_list:
+        item_type = getattr(item, "type", "message")
+        
+        if item_type == "message":
+            content = getattr(item, "text_content", str(getattr(item, "content", "")))
+            role = getattr(item, "role", "unknown")
+            print(f"[{role}]: {content}")
+        elif item_type == "agent_config_update":
+            instructions = getattr(item, "instructions", None)
+            if instructions:
+                print(f"[system]: {instructions}")
     print("------------------------------------")
