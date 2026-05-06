@@ -27,23 +27,24 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 
-time_limits = {"tech_lead": 4, "behavioral": 2, "culture": 2}  # minutes per agent
+time_limits = {"tech_lead": 2, "behavioral": 2, "culture": 2}  # minutes per agent
 
 
 # ---------------------------------------------------------------------------
-# Time-Alert Helper — fires background warnings so agents wrap up on time
+# Time-Alert Helper — appends system messages to chat_ctx so agents
+# naturally see time pressure on their next turn (no forced interruptions)
 # ---------------------------------------------------------------------------
 
 async def _start_time_alerts(agent: Agent, segment_name: str):
-    """Spawn a background task that nudges the agent at key time thresholds.
+    """Background task that injects time-awareness into the agent's chat context.
 
-    Thresholds (in minutes remaining):
-      • 2 min left  → gentle nudge
-      • 1 min left  → firm reminder
-      • 0 min left  → hard stop, instructs handoff
+    Instead of forcing generate_reply (which interrupts the conversation),
+    this appends system messages to `session.chat_ctx`. The agent sees the
+    time constraint the next time it naturally responds, so it wraps up
+    organically.
 
-    The task is stored on `agent._timer_task` so it can be cancelled in
-    on_exit or when the agent is garbage-collected.
+    Only the final "time's up" alert uses generate_reply to force an
+    immediate handoff if the agent hasn't transitioned yet.
     """
     total_minutes = time_limits.get(segment_name)
     if total_minutes is None:
@@ -52,42 +53,42 @@ async def _start_time_alerts(agent: Agent, segment_name: str):
     total_seconds = total_minutes * 60
     start = _time.monotonic()
 
-    # Define thresholds as (remaining_seconds, instruction_message)
-    thresholds = [
-        (
-            120,
-            f"⏱️ TIME CHECK: You have about 2 minutes left in your {total_minutes}-minute segment. "
-            f"Start wrapping up your current question — do NOT start a new primary question.",
-        ),
-        (
+    # (remaining_seconds, message, force_reply)
+    # force_reply=False → silent ctx append; True → generate_reply to force action
+    # (remaining_seconds, message, force_reply)
+    alerts = []
+    
+    # 1. Add half-time alert (if segment is strictly > 1 minute)
+    half_time = total_seconds // 2
+    if half_time > 60:
+        alerts.append((
+            half_time,
+            f"[TIME CHECK] You have used about half your {total_minutes}-minute segment. "
+            f"Be mindful of pacing — do NOT start a new primary question after this point.",
+            False,
+        ))
+        
+    # 2. Add 1-minute alert (if segment is >= 1 minute)
+    if total_seconds >= 60:
+        alerts.append((
             60,
-            f"⏱️ ONE MINUTE LEFT: You have ~1 minute remaining. Finish your current probe "
-            f"and begin your handoff transition to the next panelist.",
-        ),
-        (
-            0,
-            f"⏱️ TIME'S UP: Your {total_minutes}-minute segment is over. "
-            f"Immediately deliver your closing line and hand off to the next panelist NOW.",
-        ),
-    ]
+            f"[1 MINUTE LEFT] You have approximately 1 minute remaining. "
+            f"Finish your current probe and begin your handoff transition.",
+            False,
+        ))
+        
+    # 3. Always add time's up
+    alerts.append((
+        0,
+        f"[TIME'S UP] Your {total_minutes}-minute segment is over. "
+        f"Immediately deliver your closing line and hand off to the next panelist NOW.",
+        True,
+    ))
 
-    # Only keep thresholds that make sense for the segment length
-    thresholds = [
-        (remaining, msg)
-        for remaining, msg in thresholds
-        if remaining < total_seconds  # skip if threshold >= total time
-    ] + [(0, thresholds[-1][1])]  # always keep the "time's up" alert
+    # Sort so highest-remaining triggers first
+    valid_alerts = sorted(alerts, key=lambda x: x[0], reverse=True)
 
-    # Deduplicate the 0-second entry if it was already there
-    seen = set()
-    unique_thresholds = []
-    for remaining, msg in thresholds:
-        if remaining not in seen:
-            seen.add(remaining)
-            unique_thresholds.append((remaining, msg))
-    thresholds = sorted(unique_thresholds, key=lambda x: x[0], reverse=True)
-
-    for remaining_threshold, message in thresholds:
+    for remaining_threshold, message, force_reply in valid_alerts:
         elapsed = _time.monotonic() - start
         fire_at = total_seconds - remaining_threshold
         delay = fire_at - elapsed
@@ -98,15 +99,20 @@ async def _start_time_alerts(agent: Agent, segment_name: str):
         if agent.session is None:
             return
 
-        agent.session.generate_reply(instructions=message)
+        # Both silent nudges and forced replies should be visible in chat_ctx
+        print(f"[TIME CHECK] Appending system message to chat_ctx: {message}")
+        agent.session.chat_ctx.add_message(role="system", content=message)
 
-    # After the final alert, give a 30-second grace period then force handoff
+        if force_reply:
+            # Hard stop — make the agent speak and hand off immediately
+            agent.session.generate_reply(instructions=message)
+
+    # Grace period: 30s after time's up, force handoff if still here
     await asyncio.sleep(30)
     if agent.session is not None:
-        agent.session.generate_reply(
-            instructions="⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. "
-            "Say your closing line and call the transfer function immediately."
-        )
+        msg = "⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. Say your closing line and call the transfer function immediately."
+        agent.session.chat_ctx.add_message(role="system", content=msg)
+        agent.session.generate_reply(instructions=msg)
 
 # ---------------------------------------------------------------------------
 # Handoff Tool Functions — return a new Agent instance to switch to
@@ -114,39 +120,43 @@ async def _start_time_alerts(agent: Agent, segment_name: str):
 
 async def transfer_to_host(context: RunContext):
     """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
+    print_conversation_context(context)
     return HostAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=True,
+        # exclude_function_call=True,
+        # exclude_instructions=True,
         )
     )
 
 async def transfer_to_tech_lead(context: RunContext):
     """Transfer the conversation to Marcus (Tech Lead) for deep technical and architecture questions."""
+    print_conversation_context(context)
     return TechLeadAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=True,
+        # exclude_function_call=True,
+        # exclude_instructions=True,
         )
     )
 
 
 async def transfer_to_behavioral(context: RunContext):
     """Transfer the conversation to Sophia (Behavioral Interviewer) for STAR-method questions about past experiences."""
+    print_conversation_context(context)
     return BehavioralAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=True,
+        # exclude_function_call=True,
+        # exclude_instructions=True,
         )
     )
 
 
 async def transfer_to_culture(context: RunContext):
     """Transfer the conversation to Elena (Culture/Soft Skills) for conversational assessment of values and communication."""
+    print_conversation_context(context)
     return CultureAgent(
         chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=True,
+        # exclude_function_call=True,
+        # exclude_instructions=True,
         )
     )
 
@@ -290,6 +300,7 @@ async def interview_panel(ctx: agents.JobContext):
         llm=openai.LLM(
             api_key=OPENAI_API_KEY,
             model="gpt-4.1-mini",
+            parallel_tool_calls=False,
         ),
         stt=deepgram.STT(
             model="nova-3",
