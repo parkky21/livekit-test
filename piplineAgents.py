@@ -31,6 +31,10 @@ persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 
 time_limits = {"tech_lead": 3, "behavioral": 3, "culture": 3}  # minutes per agent
 
+# ---------------------------------------------------------------------------
+# Handoff Tool Functions — return a new Agent instance to switch to
+# ---------------------------------------------------------------------------
+
 async def transfer_to_host(context: RunContext):
     """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
     print_conversation_context(context)
