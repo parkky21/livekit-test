@@ -7,7 +7,8 @@ from livekit.agents import RunContext
 from dotenv import load_dotenv
 from google.genai import types
 from livekit import agents, rtc
-from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm 
+from dataclasses import dataclass
+from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm ,AgentTask
 from livekit.plugins import (
     noise_cancellation,
     google,
@@ -16,9 +17,9 @@ from livekit.plugins import (
     deepgram,
 )
 import os
-from helpers.printer_logs import print_conversation_context
-from helpers.prompts_text import host_manager, tech_lead, behavioral, culture_fit
-from helpers.time_alerts import _start_time_alerts
+from utils.printer_logs import print_conversation_context
+from utils.prompts_text import host_manager, tech_lead, behavioral, culture_fit
+from utils.time_alerts import _start_time_alerts
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -29,10 +30,6 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 
 time_limits = {"tech_lead": 3, "behavioral": 3, "culture": 3}  # minutes per agent
-
-# ---------------------------------------------------------------------------
-# Handoff Tool Functions — return a new Agent instance to switch to
-# ---------------------------------------------------------------------------
 
 async def transfer_to_host(context: RunContext):
     """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
