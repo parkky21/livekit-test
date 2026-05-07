@@ -1,10 +1,13 @@
 """
 interviewWorkflow.py
 ====================
-Full interview as two sequential, timed phases via TaskGroup:
+Full interview as two sequential timed phases via pure Agent handoffs:
 
   Phase 1 — Panel Interview  (15 min)  Panelists ask the candidate.
   Phase 2 — Candidate Q&A    ( 5 min)  Candidate asks the panel.
+
+Architecture: Imports panel agents from panelQA.py and QA agents from candidateQA.py.
+              A master timer at the session level enforces phase boundaries.
 
 Run:  uv run interviewWorkflow.py dev
 """
@@ -14,272 +17,126 @@ Run:  uv run interviewWorkflow.py dev
 import asyncio
 import logging
 import os
-from dataclasses import dataclass
-from typing import Optional
 
 from dotenv import load_dotenv
 from livekit import agents, rtc
-from livekit.agents import (
-    Agent,
-    AgentServer,
-    AgentSession,
-    AgentTask,
-    ChatContext,
-    function_tool,
-    room_io,
-)
-from livekit.agents.beta.workflows import TaskGroup
+from livekit.agents import AgentServer, AgentSession, room_io
 from livekit.plugins import deepgram, noise_cancellation, openai, silero
 
-from panelQA import BehavioralAgent, CultureAgent, TechLeadAgent
-from candidateQA import QABehavioralAgent, QACultureAgent, QATechLeadAgent
-from utils.prompts_text import host_manager, qa_host_manager
+# Panel agents (Phase 1) — each has its own voice, tools, and per-agent timer
+from panelQA import HostAgent, TechLeadAgent, BehavioralAgent, CultureAgent
+
+# Q&A agents (Phase 2) — candidate asks, panelists answer
+from candidateQA import QAHostAgent, QATechLeadAgent, QABehavioralAgent, QACultureAgent
 
 # ── Config ───────────────────────────────────────────────────────────────────
 
 load_dotenv()
 
-OPENAI_API_KEY   = os.getenv("OPENAI_API_KEY")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 DEEPGRAM_API_KEY = os.getenv("DEEPGRAM_API_KEY")
 LEMONFOX_API_KEY = os.getenv("LEMONFOX_API_KEY")
 
 VOICES = {"sarah": "sarah", "marcus": "liam", "sophia": "kore", "elena": "heart"}
 
-PANEL_MINUTES = 15
-QA_MINUTES    = 5
-
-
-# ── Result types ─────────────────────────────────────────────────────────────
-
-@dataclass
-class PanelResult:
-    status: str   # "time_up" | "completed"
-
-@dataclass
-class QAResult:
-    status: str   # "time_up" | "completed"
+PANEL_MINUTES = 8
+QA_MINUTES = 5
 
 
 # ── Helpers ──────────────────────────────────────────────────────────────────
 
-def _copy_ctx(session) -> ChatContext:
-    """Shortcut: copy session chat context, stripping tool-call noise."""
-    return session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=False,
+def _make_tts(voice_key: str) -> openai.TTS:
+    """Create a LemonFox TTS instance for the given persona."""
+    return openai.TTS(
+        base_url="https://api.lemonfox.ai/v1",
+        model="tts-1",
+        api_key=LEMONFOX_API_KEY,
+        voice=VOICES[voice_key],
     )
 
 
 # ═════════════════════════════════════════════════════════════════════════════
-# Task 1 · Panel Interview  (15 min)
+# Master Timer — enforces overall phase boundaries at the session level
 # ═════════════════════════════════════════════════════════════════════════════
 
-class PanelInterviewTask(AgentTask[PanelResult]):
-    """Panelists ask the candidate questions. Auto-completes after 15 min."""
+async def _master_timer(session: AgentSession) -> None:
+    """Background task that enforces the two-phase time structure.
 
-    def __init__(self, chat_ctx: Optional[ChatContext] = None) -> None:
-        super().__init__(instructions=host_manager, chat_ctx=chat_ctx)
-        self._timer: Optional[asyncio.Task] = None
-
-    # ── Lifecycle ────────────────────────────────────────────────────────
-
-    async def on_enter(self) -> None:
-        self._timer = asyncio.create_task(self._countdown())
-        self.session.generate_reply(
-            instructions=(
-                "Welcome the candidate to their AI Engineer interview. "
-                "Introduce yourself as Sarah, the Hiring Manager and Host. "
-                "Introduce the panel: Marcus (Tech Lead), Sophia (Behavioral), "
-                "Elena (Culture/Soft Skills). Ask if they're ready. "
-                "Keep it under 4 sentences."
-            )
-        )
-
-    # ── Timer ────────────────────────────────────────────────────────────
-
-    async def _countdown(self) -> None:
-        try:
-            total = PANEL_MINUTES * 60
-
-            # ⏱ 2-min warning
-            await asyncio.sleep(total - 120)
-            if self.session:
-                self.session._chat_ctx.add_message(
-                    role="system",
-                    content="[2 MIN LEFT] Wrap up. The Q&A round is next.",
-                )
-
-            # ⏱ 30-sec warning
-            await asyncio.sleep(90)
-            if self.session:
-                self.session._chat_ctx.add_message(
-                    role="system",
-                    content="[TIME UP — 30s] Say your closing line NOW.",
-                )
-                self.session.generate_reply(
-                    instructions=(
-                        "Time is up for the panel round. Thank the candidate "
-                        "briefly and let them know we're moving to Q&A."
-                    )
-                )
-
-            await asyncio.sleep(30)
-            self.complete(PanelResult(status="time_up"))
-        except asyncio.CancelledError:
-            pass
-
-    # ── Handoff tools ────────────────────────────────────────────────────
-
-    @function_tool()
-    async def transfer_to_tech_lead(self) -> TechLeadAgent:
-        """Hand off to Marcus for deep technical questions."""
-        return TechLeadAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def transfer_to_behavioral(self) -> BehavioralAgent:
-        """Hand off to Sophia for STAR-method behavioral questions."""
-        return BehavioralAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def transfer_to_culture(self) -> CultureAgent:
-        """Hand off to Elena for culture & soft-skills assessment."""
-        return CultureAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def panel_round_complete(self) -> None:
-        """End the panel round early (e.g. all panelists finished)."""
-        if self._timer:
-            self._timer.cancel()
-        self.complete(PanelResult(status="completed"))
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Task 2 · Candidate Q&A  (5 min)
-# ═════════════════════════════════════════════════════════════════════════════
-
-class CandidateQATask(AgentTask[QAResult]):
-    """Candidate asks the panel questions. Auto-completes after 5 min."""
-
-    def __init__(self, chat_ctx: Optional[ChatContext] = None) -> None:
-        super().__init__(instructions=qa_host_manager, chat_ctx=chat_ctx)
-        self._timer: Optional[asyncio.Task] = None
-
-    # ── Lifecycle ────────────────────────────────────────────────────────
-
-    async def on_enter(self) -> None:
-        self._timer = asyncio.create_task(self._countdown())
-        self.session.generate_reply(
-            instructions=(
-                "Open the floor for the candidate's questions. "
-                "'That wraps up our questions — now it's your turn! "
-                "The whole panel is here. Ask us anything.' "
-                "Keep it under 3 sentences."
-            )
-        )
-
-    # ── Timer ────────────────────────────────────────────────────────────
-
-    async def _countdown(self) -> None:
-        try:
-            total = QA_MINUTES * 60
-
-            # ⏱ 1-min warning
-            await asyncio.sleep(total - 60)
-            if self.session:
-                self.session._chat_ctx.add_message(
-                    role="system",
-                    content="[1 MIN LEFT] Let them finish, then wrap up.",
-                )
-
-            # ⏱ 30-sec final
-            await asyncio.sleep(30)
-            if self.session:
-                self.session._chat_ctx.add_message(
-                    role="system",
-                    content="[TIME UP] Close the interview now.",
-                )
-                self.session.generate_reply(
-                    instructions=(
-                        "Time is up. Thank the candidate warmly, share next "
-                        "steps (hear back within a week), and say goodbye."
-                    )
-                )
-
-            await asyncio.sleep(30)
-            self.complete(QAResult(status="time_up"))
-        except asyncio.CancelledError:
-            pass
-
-    # ── Handoff tools ────────────────────────────────────────────────────
-
-    @function_tool()
-    async def transfer_to_tech_lead(self) -> QATechLeadAgent:
-        """Candidate asked a technical question — Marcus answers."""
-        return QATechLeadAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def transfer_to_behavioral(self) -> QABehavioralAgent:
-        """Candidate asked about team dynamics — Sophia answers."""
-        return QABehavioralAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def transfer_to_culture(self) -> QACultureAgent:
-        """Candidate asked about culture / values — Elena answers."""
-        return QACultureAgent(chat_ctx=_copy_ctx(self.session))
-
-    @function_tool()
-    async def qa_round_complete(self) -> None:
-        """End Q&A early (candidate has no more questions)."""
-        if self._timer:
-            self._timer.cancel()
-        self.complete(QAResult(status="completed"))
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Orchestrator — runs both tasks in sequence via TaskGroup
-# ═════════════════════════════════════════════════════════════════════════════
-
-class InterviewOrchestrator(Agent):
+    Phase 1 (Panel):  PANEL_MINUTES
+      - 2 min warning → system message
+      - 30s left      → force wrap-up + transition to Q&A
+    Phase 2 (Q&A):    QA_MINUTES
+      - 1 min warning → system message
+      - 30s left      → force closing
     """
-    Master agent.  Runs:
-      1. PanelInterviewTask  (15 min)
-      2. CandidateQATask     ( 5 min)
-    Then closes the session.
-    """
+    try:
+        total_panel = PANEL_MINUTES * 60
 
-    def __init__(self) -> None:
-        super().__init__(
-            instructions="You orchestrate the interview. The tasks handle all interaction.",
-            tts=openai.TTS(
-                base_url="https://api.lemonfox.ai/v1",
-                model="tts-1",
-                api_key=LEMONFOX_API_KEY,
-                voice=VOICES["sarah"],
+        # ── Panel: 2 min warning ─────────────────────────────────────────
+        await asyncio.sleep(total_panel - 120)
+        print("[MASTER TIMER] Panel: 2 minutes left")
+        session.history.add_message(
+            role="system",
+            content=(
+                "[PANEL: 2 MIN LEFT] The panel round has 2 minutes remaining. "
+                "Current agent: wrap up your question and prepare for transition."
             ),
         )
 
-    async def on_enter(self) -> None:
-        task_group = TaskGroup(chat_ctx=self.chat_ctx)
-
-        task_group.add(
-            lambda: PanelInterviewTask(),
-            id="panel_interview",
-            description="Panel round — panelists ask the candidate (15 min)",
+        # ── Panel: 30s left → force wrap-up ──────────────────────────────
+        await asyncio.sleep(90)
+        print("[MASTER TIMER] Panel: 30 seconds — forcing wrap-up")
+        session.history.add_message(
+            role="system",
+            content="[PANEL: TIME UP] Say your closing line NOW and hand back to Sarah.",
         )
-        task_group.add(
-            lambda: CandidateQATask(),
-            id="candidate_qa",
-            description="Q&A round — candidate asks the panel (5 min)",
+        session.generate_reply(
+            instructions=(
+                "Time is up for the panel round. Thank the candidate briefly "
+                "and let them know we're moving to the Q&A round."
+            )
         )
 
-        results = await task_group
-
-        print(f"[WORKFLOW] Panel:  {results.task_results.get('panel_interview')}")
-        print(f"[WORKFLOW] Q&A:    {results.task_results.get('candidate_qa')}")
-
-        await self.session.generate_reply(
-            instructions="Thank the candidate one final time and wish them well."
+        # ── Panel → Q&A transition ───────────────────────────────────────
+        await asyncio.sleep(30)
+        print("[MASTER TIMER] Forcing transition to Q&A phase")
+        session.update_agent(
+            QAHostAgent(
+                chat_ctx=session.history.copy(
+                    exclude_function_call=True,
+                    exclude_instructions=True,
+                )
+            )
         )
+
+        # ── Q&A: 1 min warning ───────────────────────────────────────────
+        total_qa = QA_MINUTES * 60
+        await asyncio.sleep(total_qa - 60)
+        print("[MASTER TIMER] Q&A: 1 minute left")
+        session.history.add_message(
+            role="system",
+            content="[Q&A: 1 MIN LEFT] Let the candidate finish, then wrap up.",
+        )
+
+        # ── Q&A: 30s left → force closing ────────────────────────────────
+        await asyncio.sleep(30)
+        print("[MASTER TIMER] Q&A: 30 seconds — forcing close")
+        session.history.add_message(
+            role="system",
+            content="[Q&A: TIME UP] Close the interview now.",
+        )
+        session.generate_reply(
+            instructions=(
+                "Time is up. Thank the candidate warmly, share next "
+                "steps (hear back within a week), and say goodbye."
+            )
+        )
+
+        await asyncio.sleep(30)
+        print("[MASTER TIMER] Interview complete")
+
+    except asyncio.CancelledError:
+        print("[MASTER TIMER] Timer cancelled")
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -309,18 +166,14 @@ async def full_interview(ctx: agents.JobContext):
             language="en-US",
             api_key=DEEPGRAM_API_KEY,
         ),
-        tts=openai.TTS(
-            base_url="https://api.lemonfox.ai/v1",
-            model="tts-1",
-            api_key=LEMONFOX_API_KEY,
-            voice=VOICES["sarah"],
-        ),
+        tts=_make_tts("sarah"),  # default TTS
         vad=ctx.proc.userdata.get("vad"),
     )
 
+    # Start with the panel HostAgent (Sarah) from panelQA.py
     await session.start(
         room=ctx.room,
-        agent=InterviewOrchestrator(),
+        agent=HostAgent(),
         room_options=room_io.RoomOptions(
             audio_input=room_io.AudioInputOptions(
                 noise_cancellation=lambda p: noise_cancellation.BVCTelephony()
@@ -329,6 +182,20 @@ async def full_interview(ctx: agents.JobContext):
             ),
         ),
     )
+
+    # Initial welcome (HostAgent.on_enter is a pass, so we trigger it here)
+    await session.generate_reply(
+        instructions=(
+            "Welcome the candidate to their AI Engineer interview. "
+            "Introduce yourself as Sarah, the Hiring Manager and Host. "
+            "Introduce the panel: Marcus (Tech Lead), Sophia (Behavioral), "
+            "Elena (Culture/Soft Skills). Ask if they're ready. "
+            "Keep it under 4 sentences."
+        )
+    )
+
+    # Start the master timer to enforce phase boundaries
+    asyncio.create_task(_master_timer(session))
 
 
 # ── Logging ──────────────────────────────────────────────────────────────────

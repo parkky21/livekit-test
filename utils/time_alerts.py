@@ -67,7 +67,7 @@ async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict)
 
             # Append system message to chat context
             print(f"[TIME ALERTS] [{segment_name}] {message}")
-            agent.session._chat_ctx.add_message(role="system", content=message)
+            agent.session.history.add_message(role="system", content=message)
 
             if force_reply:
                 # Hard stop — make the agent speak and hand off immediately
@@ -81,7 +81,7 @@ async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict)
                 "Say your closing line and call the transfer function immediately."
             )
             print(f"[TIME ALERTS] [{segment_name}] GRACE PERIOD — forcing handoff")
-            agent.session.chat_ctx.add_message(role="system", content=msg)
+            agent.session.history.add_message(role="system", content=msg)
             agent.session.generate_reply(instructions=msg)
 
     except asyncio.CancelledError:

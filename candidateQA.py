@@ -6,7 +6,7 @@ from livekit.agents import ChatContext
 from livekit.agents import RunContext
 from dotenv import load_dotenv
 from livekit import agents, rtc
-from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm, AgentTask
+from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm
 from livekit.plugins import (
     noise_cancellation,
     silero,
@@ -34,7 +34,7 @@ async def qa_transfer_to_host(context: RunContext):
     """Transfer to Sarah (Host) — for general questions, role overview, process, or to prompt the next question."""
     print_conversation_context(context)
     return QAHostAgent(
-        chat_ctx=context.session._chat_ctx.copy(
+        chat_ctx=context.session.history.copy(
             exclude_function_call=True,
             exclude_instructions=False,
         )
@@ -45,7 +45,7 @@ async def qa_transfer_to_tech_lead(context: RunContext):
     """Transfer to Marcus (Tech Lead) — the candidate asked a technical question about architecture, tech stack, engineering practices, deployments, or code review."""
     print_conversation_context(context)
     return QATechLeadAgent(
-        chat_ctx=context.session._chat_ctx.copy(
+        chat_ctx=context.session.history.copy(
             exclude_function_call=True,
             exclude_instructions=False,
         )
@@ -56,7 +56,7 @@ async def qa_transfer_to_behavioral(context: RunContext):
     """Transfer to Sophia (Behavioral) — the candidate asked about team dynamics, collaboration, mentorship, conflict resolution, or how people work together."""
     print_conversation_context(context)
     return QABehavioralAgent(
-        chat_ctx=context.session._chat_ctx.copy(
+        chat_ctx=context.session.history.copy(
             exclude_function_call=True,
             exclude_instructions=False,
         )
@@ -67,7 +67,7 @@ async def qa_transfer_to_culture(context: RunContext):
     """Transfer to Elena (Culture/Soft Skills) — the candidate asked about company culture, values, work-life balance, diversity, remote work, or the workplace vibe."""
     print_conversation_context(context)
     return QACultureAgent(
-        chat_ctx=context.session._chat_ctx.copy(
+        chat_ctx=context.session.history.copy(
             exclude_function_call=True,
             exclude_instructions=False,
         )
@@ -200,9 +200,7 @@ def prewarm(proc: agents.JobProcess):
     print("Prewarming")
     proc.userdata["vad"] = silero.VAD.load()
 
-
 server.setup_fnc = prewarm
-
 
 @server.rtc_session()
 async def after_interview_qa(ctx: agents.JobContext):

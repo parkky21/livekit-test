@@ -1,7 +1,7 @@
 from livekit.agents import RunContext
 
 def print_conversation_context(context: RunContext):
-    chat = context.session._chat_ctx.copy(
+    chat = context.session.history.copy(
         exclude_function_call=True,
         exclude_instructions=False,
     )

@@ -8,7 +8,7 @@ from dotenv import load_dotenv
 from google.genai import types
 from livekit import agents, rtc
 from dataclasses import dataclass
-from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm ,AgentTask
+from livekit.agents import AgentServer, AgentSession, Agent, room_io, llm
 from livekit.plugins import (
     noise_cancellation,
     google,
@@ -39,9 +39,9 @@ async def transfer_to_host(context: RunContext):
     """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
     print_conversation_context(context)
     return HostAgent(
-        chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=False,
+        chat_ctx=context.session.history.copy(
+            exclude_function_call=True,
+            exclude_instructions=False,
         )
     )
 
@@ -49,9 +49,9 @@ async def transfer_to_tech_lead(context: RunContext):
     """Transfer the conversation to Marcus (Tech Lead) for deep technical and architecture questions."""
     print_conversation_context(context)
     return TechLeadAgent(
-        chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=False,
+        chat_ctx=context.session.history.copy(
+            exclude_function_call=True,
+            exclude_instructions=False,
         )
     )
 
@@ -60,9 +60,9 @@ async def transfer_to_behavioral(context: RunContext):
     """Transfer the conversation to Sophia (Behavioral Interviewer) for STAR-method questions about past experiences."""
     print_conversation_context(context)
     return BehavioralAgent(
-        chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=False,
+        chat_ctx=context.session.history.copy(
+            exclude_function_call=True,
+            exclude_instructions=False,
         )
     )
 
@@ -71,9 +71,9 @@ async def transfer_to_culture(context: RunContext):
     """Transfer the conversation to Elena (Culture/Soft Skills) for conversational assessment of values and communication."""
     print_conversation_context(context)
     return CultureAgent(
-        chat_ctx=context.session._chat_ctx.copy(
-        exclude_function_call=True,
-        exclude_instructions=False,
+        chat_ctx=context.session.history.copy(
+            exclude_function_call=True,
+            exclude_instructions=False,
         )
     )
 
