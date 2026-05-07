@@ -3,6 +3,15 @@ import time as _time
 import traceback
 from livekit.agents import Agent
 
+
+def _get_session(agent: Agent):
+    """Safely get the agent's session. Returns None if the agent has been swapped out."""
+    try:
+        return agent.session
+    except RuntimeError:
+        return None
+
+
 async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict):
     """Background task that injects time-awareness into the agent's chat context.
 
@@ -61,28 +70,30 @@ async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict)
                 await asyncio.sleep(delay)
 
             # Agent may have already been swapped out — skip remaining alerts
-            if agent.session is None:
-                print(f"[TIME ALERTS] Agent session is None for '{segment_name}', stopping timer.")
+            session = _get_session(agent)
+            if session is None:
+                print(f"[TIME ALERTS] Agent no longer active for '{segment_name}', stopping timer.")
                 return
 
             # Append system message to chat context
             print(f"[TIME ALERTS] [{segment_name}] {message}")
-            agent.session.history.add_message(role="system", content=message)
+            session.history.add_message(role="system", content=message)
 
             if force_reply:
                 # Hard stop — make the agent speak and hand off immediately
-                agent.session.generate_reply(instructions=message)
+                session.generate_reply(instructions=message)
 
         # Grace period: 30s after the last alert, force handoff if still here
         await asyncio.sleep(30)
-        if agent.session is not None:
+        session = _get_session(agent)
+        if session is not None:
             msg = (
                 "⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. "
                 "Say your closing line and call the transfer function immediately."
             )
             print(f"[TIME ALERTS] [{segment_name}] GRACE PERIOD — forcing handoff")
-            agent.session.history.add_message(role="system", content=msg)
-            agent.session.generate_reply(instructions=msg)
+            session.history.add_message(role="system", content=msg)
+            session.generate_reply(instructions=msg)
 
     except asyncio.CancelledError:
         print(f"[TIME ALERTS] Timer task for '{segment_name}' was cancelled.")
