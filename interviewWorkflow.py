@@ -1,19 +1,3 @@
-"""
-interviewWorkflow.py
-====================
-Full interview as two sequential timed phases via pure Agent handoffs:
-
-  Phase 1 — Panel Interview  (15 min)  Panelists ask the candidate.
-  Phase 2 — Candidate Q&A    ( 5 min)  Candidate asks the panel.
-
-Architecture: Imports panel agents from panelQA.py and QA agents from candidateQA.py.
-              A master timer at the session level enforces phase boundaries.
-
-Run:  uv run interviewWorkflow.py dev
-"""
-
-# ── Imports ──────────────────────────────────────────────────────────────────
-
 import asyncio
 import logging
 import os
@@ -29,8 +13,6 @@ from panelQA import HostAgent, TechLeadAgent, BehavioralAgent, CultureAgent
 # Q&A agents (Phase 2) — candidate asks, panelists answer
 from candidateQA import QAHostAgent, QATechLeadAgent, QABehavioralAgent, QACultureAgent
 
-# ── Config ───────────────────────────────────────────────────────────────────
-
 load_dotenv()
 
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
@@ -42,9 +24,6 @@ VOICES = {"sarah": "sarah", "marcus": "liam", "sophia": "kore", "elena": "heart"
 PANEL_MINUTES = 8
 QA_MINUTES = 5
 
-
-# ── Helpers ──────────────────────────────────────────────────────────────────
-
 def _make_tts(voice_key: str) -> openai.TTS:
     """Create a LemonFox TTS instance for the given persona."""
     return openai.TTS(
@@ -53,11 +32,6 @@ def _make_tts(voice_key: str) -> openai.TTS:
         api_key=LEMONFOX_API_KEY,
         voice=VOICES[voice_key],
     )
-
-
-# ═════════════════════════════════════════════════════════════════════════════
-# Master Timer — enforces overall phase boundaries at the session level
-# ═════════════════════════════════════════════════════════════════════════════
 
 async def _master_timer(session: AgentSession) -> None:
     """Background task that enforces the two-phase time structure.
@@ -139,10 +113,6 @@ async def _master_timer(session: AgentSession) -> None:
         print("[MASTER TIMER] Timer cancelled")
 
 
-# ═════════════════════════════════════════════════════════════════════════════
-# Server
-# ═════════════════════════════════════════════════════════════════════════════
-
 server = AgentServer()
 
 
@@ -198,13 +168,10 @@ async def full_interview(ctx: agents.JobContext):
     asyncio.create_task(_master_timer(session))
 
 
-# ── Logging ──────────────────────────────────────────────────────────────────
-
 class _SuppressDecodeErrors(logging.Filter):
     def filter(self, record):
         msg = record.getMessage()
         return not (msg == "error decoding audio" or "avcodec_send_packet" in msg)
-
 
 logging.getLogger("livekit.agents").addFilter(_SuppressDecodeErrors())
 
