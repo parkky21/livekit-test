@@ -20,6 +20,8 @@ import os
 from utils.printer_logs import print_conversation_context
 from utils.prompts_text import host_manager, tech_lead, behavioral, culture_fit
 from utils.time_alerts import _start_time_alerts
+from utils.chats_context import get_chat_context_without_instruction
+
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -39,20 +41,14 @@ async def transfer_to_host(context: RunContext):
     """Transfer the conversation to Sarah (Hiring Manager/Host) for welcoming or wrapping up."""
     print_conversation_context(context)
     return HostAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 async def transfer_to_tech_lead(context: RunContext):
     """Transfer the conversation to Marcus (Tech Lead) for deep technical and architecture questions."""
     print_conversation_context(context)
     return TechLeadAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
@@ -60,10 +56,7 @@ async def transfer_to_behavioral(context: RunContext):
     """Transfer the conversation to Sophia (Behavioral Interviewer) for STAR-method questions about past experiences."""
     print_conversation_context(context)
     return BehavioralAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
@@ -71,12 +64,8 @@ async def transfer_to_culture(context: RunContext):
     """Transfer the conversation to Elena (Culture/Soft Skills) for conversational assessment of values and communication."""
     print_conversation_context(context)
     return CultureAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
-
 
 # ---------------------------------------------------------------------------
 # Agent Definitions — each has its own LLM (with a unique voice) + handoff tools

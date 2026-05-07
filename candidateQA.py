@@ -16,7 +16,7 @@ from livekit.plugins import (
 import os
 from utils.printer_logs import print_conversation_context
 from utils.prompts_text import qa_host_manager, qa_tech_lead, qa_behavioral, qa_culture_fit
-
+from utils.chats_context import get_chat_context_without_instruction, get_chat_context_with_instruction
 load_dotenv()
 
 GOOGLE_API_KEY = os.getenv("GOOGLE_API_KEY")
@@ -34,10 +34,7 @@ async def qa_transfer_to_host(context: RunContext):
     """Transfer to Sarah (Host) — for general questions, role overview, process, or to prompt the next question."""
     print_conversation_context(context)
     return QAHostAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
@@ -45,10 +42,7 @@ async def qa_transfer_to_tech_lead(context: RunContext):
     """Transfer to Marcus (Tech Lead) — the candidate asked a technical question about architecture, tech stack, engineering practices, deployments, or code review."""
     print_conversation_context(context)
     return QATechLeadAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
@@ -56,10 +50,7 @@ async def qa_transfer_to_behavioral(context: RunContext):
     """Transfer to Sophia (Behavioral) — the candidate asked about team dynamics, collaboration, mentorship, conflict resolution, or how people work together."""
     print_conversation_context(context)
     return QABehavioralAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
@@ -67,10 +58,7 @@ async def qa_transfer_to_culture(context: RunContext):
     """Transfer to Elena (Culture/Soft Skills) — the candidate asked about company culture, values, work-life balance, diversity, remote work, or the workplace vibe."""
     print_conversation_context(context)
     return QACultureAgent(
-        chat_ctx=context.session.history.copy(
-            exclude_function_call=True,
-            exclude_instructions=False,
-        )
+        chat_ctx=get_chat_context_without_instruction(context)
     )
 
 
