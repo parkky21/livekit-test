@@ -31,8 +31,8 @@ from livekit.agents import (
 from livekit.agents.beta.workflows import TaskGroup
 from livekit.plugins import deepgram, noise_cancellation, openai, silero
 
-from piplineAgents import BehavioralAgent, CultureAgent, TechLeadAgent
-from afterInterviewPipeline import QABehavioralAgent, QACultureAgent, QATechLeadAgent
+from panelQA import BehavioralAgent, CultureAgent, TechLeadAgent
+from candidateQA import QABehavioralAgent, QACultureAgent, QATechLeadAgent
 from utils.prompts_text import host_manager, qa_host_manager
 
 # ── Config ───────────────────────────────────────────────────────────────────
