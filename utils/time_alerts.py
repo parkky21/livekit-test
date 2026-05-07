@@ -45,17 +45,20 @@ async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict)
         if total_seconds >= 60:
             alerts.append((
                 60,
-                "[1 MINUTE LEFT] Do NOT ask any more questions. "
-                "Let the candidate finish their current answer. Do NOT transfer yet.",
+                "[1 MINUTE LEFT] Your questioning is OVER. "
+                "Do NOT ask any more questions — not even a follow-up. "
+                "Let the candidate finish their current answer, then say ONE short closing sentence "
+                "and call the transfer function. Do NOT continue the conversation.",
                 False,
             ))
 
-        # 3. At last 30s
+        # 3. At last 30s — force reply with very explicit instructions
         if total_seconds >= 30:
             alerts.append((
                 30,
-                "[TIME IS UP] Your time is up. "
-                "Speak your closing line now and transfer to the next agent.",
+                "[TIME IS UP — HARD STOP] Do NOT speak another question. "
+                "Say ONLY: 'I think I've got a solid picture. [Next panelist name] — over to you.' "
+                "Then IMMEDIATELY call the transfer function. Nothing else.",
                 True,
             ))
 
@@ -88,8 +91,9 @@ async def _start_time_alerts(agent: Agent, segment_name: str, time_limits: dict)
         session = _get_session(agent)
         if session is not None:
             msg = (
-                "⛔ GRACE PERIOD OVER. You MUST hand off RIGHT NOW. "
-                "Say your closing line and call the transfer function immediately."
+                "⛔ FINAL WARNING. You have FAILED to transfer on time. "
+                "Do NOT say anything else to the candidate. "
+                "Call the transfer function NOW. This is not optional."
             )
             print(f"[TIME ALERTS] [{segment_name}] GRACE PERIOD — forcing handoff")
             session.history.add_message(role="system", content=msg)
