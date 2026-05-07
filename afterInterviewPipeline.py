@@ -182,12 +182,24 @@ class QACultureAgent(Agent):
 # Server Setup
 # ---------------------------------------------------------------------------
 
+import logging
+
+class SuppressDecodeErrorFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        if msg == "error decoding audio" or "avcodec_send_packet" in msg:
+            return False
+        return True
+
+logging.getLogger("livekit.agents").addFilter(SuppressDecodeErrorFilter())
+
 server = AgentServer()
 
 
 def prewarm(proc: agents.JobProcess):
     print("Prewarming")
     proc.userdata["vad"] = silero.VAD.load()
+
 
 server.setup_fnc = prewarm
 
@@ -231,17 +243,6 @@ async def after_interview_qa(ctx: agents.JobContext):
         "Keep it under 3 sentences. Sound genuinely inviting."
     )
 
-
-import logging
-
-class SuppressDecodeErrorFilter(logging.Filter):
-    def filter(self, record):
-        msg = record.getMessage()
-        if msg == "error decoding audio" or "avcodec_send_packet" in msg:
-            return False
-        return True
-
-logging.getLogger("livekit.agents").addFilter(SuppressDecodeErrorFilter())
 
 if __name__ == "__main__":
     agents.cli.run_app(server)

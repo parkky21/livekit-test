@@ -200,6 +200,17 @@ class CultureAgent(Agent):
 # Server Setup
 # ---------------------------------------------------------------------------
 
+import logging
+
+class SuppressDecodeErrorFilter(logging.Filter):
+    def filter(self, record):
+        msg = record.getMessage()
+        if msg == "error decoding audio" or "avcodec_send_packet" in msg:
+            return False
+        return True
+
+logging.getLogger("livekit.agents").addFilter(SuppressDecodeErrorFilter())
+
 server = AgentServer()
 
 
@@ -207,7 +218,9 @@ def prewarm(proc: agents.JobProcess):
     print("Prewarming")
     proc.userdata["vad"] = silero.VAD.load()
 
+
 server.setup_fnc = prewarm
+
 
 @server.rtc_session()
 async def interview_panel(ctx: agents.JobContext):
@@ -247,19 +260,6 @@ async def interview_panel(ctx: agents.JobContext):
         "Ask if they're ready to begin. Keep it under 4 sentences."
     )
 
-
-import logging
-
-class SuppressDecodeErrorFilter(logging.Filter):
-    def filter(self, record):
-        msg = record.getMessage()
-        # Suppress specifically the PyAV decoding errors
-        if msg == "error decoding audio" or "avcodec_send_packet" in msg:
-            return False
-        return True
-
-# Attach the filter to the livekit.agents logger to hide these specific decoding errors
-logging.getLogger("livekit.agents").addFilter(SuppressDecodeErrorFilter())
 
 if __name__ == "__main__":
     agents.cli.run_app(server)
