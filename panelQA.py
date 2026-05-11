@@ -31,7 +31,7 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 persona = { "girl":["heart","kore", "sarah"], "boy":["liam","puck","eric"]}
 
-time_limits = {"tech_lead": 3, "behavioral": 3, "culture": 3}  # minutes per agent
+time_limits = {"tech_lead": 5, "behavioral": 3, "culture": 3}  # minutes per agent
 
 # ---------------------------------------------------------------------------
 # Handoff Tool Functions — return a new Agent instance to switch to

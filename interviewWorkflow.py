@@ -21,7 +21,7 @@ LEMONFOX_API_KEY = os.getenv("LEMONFOX_API_KEY")
 
 VOICES = {"sarah": "sarah", "marcus": "liam", "sophia": "kore", "elena": "heart"}
 
-PANEL_MINUTES = 8
+PANEL_MINUTES = 15
 QA_MINUTES = 5
 
 def _make_tts(voice_key: str) -> openai.TTS:
